@@ -1,6 +1,4 @@
-Oke! Ini SINGLE FILE README.md yang lengkap untuk EcoTracker Flutter app:
-
-markdown# 🌱 EcoTracker - Mobile App (Flutter)
+🌱 EcoTracker - Mobile App (Flutter)
 
 **EcoTracker** adalah aplikasi mobile untuk mengelola permintaan pengambilan sampah daur ulang. Aplikasi ini memiliki dua role utama: **User** (meminta pickup) dan **Collector** (mengambil & memproses sampah).
 
