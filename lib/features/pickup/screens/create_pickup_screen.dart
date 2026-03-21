@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
 import '../providers/pickup_provider.dart';
+import '../../../core/constants/app_colors.dart';
+import '../../../core/constants/app_text_styles.dart';
+import '../../../core/widgets/app_widgets.dart';
 
 class CreatePickupScreen extends StatefulWidget {
   const CreatePickupScreen({super.key});
@@ -15,329 +17,119 @@ class CreatePickupScreen extends StatefulWidget {
 
 class _CreatePickupScreenState extends State<CreatePickupScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _addressController = TextEditingController();
-  final _notesController = TextEditingController();
-  final ImagePicker _picker = ImagePicker();
-  
-  File? _imageFile;
-  double? _latitude;
-  double? _longitude;
-  bool _loadingLocation = false;
-  bool _uploadingImage = false;
+  final _addressCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
+  File? _selectedPhoto;
+  double? _lat;
+  double? _lon;
+  bool _isGettingLocation = false;
+  double _uploadProgress = 0;
 
   @override
   void dispose() {
-    _addressController.dispose();
-    _notesController.dispose();
+    _addressCtrl.dispose();
+    _notesCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _getCurrentLocation() async {
-    setState(() => _loadingLocation = true);
-
+  Future<void> _getLocation() async {
+    setState(() => _isGettingLocation = true);
     try {
-      // Check and request permission
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        _showError('Layanan lokasi tidak aktif');
+        return;
+      }
+
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Location permission is required'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-          setState(() => _loadingLocation = false);
+          _showError('Izin lokasi ditolak');
           return;
         }
       }
 
-      if (permission == LocationPermission.deniedForever) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Location permission denied forever. Enable in settings.'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        setState(() => _loadingLocation = false);
-        return;
-      }
-
-      // Get current position
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-
+      final pos = await Geolocator.getCurrentPosition();
       setState(() {
-        _latitude = position.latitude;
-        _longitude = position.longitude;
-        _loadingLocation = false;
+        _lat = pos.latitude;
+        _lon = pos.longitude;
+        _addressCtrl.text = 'Lat: ${pos.latitude.toStringAsFixed(4)}, Lon: ${pos.longitude.toStringAsFixed(4)}';
       });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Location detected successfully! ✓'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
     } catch (e) {
-      setState(() => _loadingLocation = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _showError('Gagal mendapatkan lokasi');
+    } finally {
+      setState(() => _isGettingLocation = false);
     }
   }
 
-  Future<void> _pickImageFromCamera() async {
-    setState(() => _uploadingImage = true);
-    
-    try {
-      // Request camera permission
-      var cameraStatus = await Permission.camera.request();
-      if (!cameraStatus.isGranted) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Camera permission denied')),
-          );
-        }
-        setState(() => _uploadingImage = false);
-        return;
-      }
-
-      final XFile? image = await _picker.pickImage(
-        source: ImageSource.camera,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
-      );
-
-      if (image != null) {
-        setState(() {
-          _imageFile = File(image.path);
-          _uploadingImage = false;
-        });
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Photo captured! ✓'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 1),
-            ),
-          );
-        }
-      } else {
-        setState(() => _uploadingImage = false);
-      }
-    } catch (e) {
-      setState(() => _uploadingImage = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Camera error: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
+  Future<void> _pickImage(ImageSource source) async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: source, imageQuality: 70, maxWidth: 1024);
+    if (picked != null) setState(() => _selectedPhoto = File(picked.path));
   }
 
-  Future<void> _pickImageFromGallery() async {
-    setState(() => _uploadingImage = true);
-    
-    try {
-      // Request storage permission
-      var storageStatus = await Permission.photos.request();
-      if (!storageStatus.isGranted) {
-        // Try with storage permission as fallback
-        storageStatus = await Permission.storage.request();
-        if (!storageStatus.isGranted) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Storage permission denied')),
-            );
-          }
-          setState(() => _uploadingImage = false);
-          return;
-        }
-      }
-
-      final XFile? image = await _picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
-      );
-
-      if (image != null) {
-        setState(() {
-          _imageFile = File(image.path);
-          _uploadingImage = false;
-        });
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Photo selected! ✓'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 1),
-            ),
-          );
-        }
-      } else {
-        setState(() => _uploadingImage = false);
-      }
-    } catch (e) {
-      setState(() => _uploadingImage = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Gallery error: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  void _showImageSourceDialog() {
+  void _showImagePicker() {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Select Photo Source',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 20),
-            ListTile(
-              leading: const Icon(Icons.camera_alt, color: Colors.blue),
-              title: const Text('Camera'),
-              subtitle: const Text('Take a new photo'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImageFromCamera();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: Colors.green),
-              title: const Text('Gallery'),
-              subtitle: const Text('Choose from gallery'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImageFromGallery();
-              },
-            ),
-            const SizedBox(height: 10),
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-          ],
-        ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Pilih Foto', style: AppTextStyles.h4),
+          const SizedBox(height: 16),
+          Row(children: [
+            Expanded(child: OutlinedButton.icon(
+              onPressed: () { Navigator.pop(context); _pickImage(ImageSource.camera); },
+              icon: const Icon(Icons.camera_alt_rounded),
+              label: const Text('Kamera'),
+            )),
+            const SizedBox(width: 12),
+            Expanded(child: OutlinedButton.icon(
+              onPressed: () { Navigator.pop(context); _pickImage(ImageSource.gallery); },
+              icon: const Icon(Icons.photo_library_rounded),
+              label: const Text('Galeri'),
+            )),
+          ]),
+        ]),
       ),
     );
   }
 
-  Future<void> _submitPickup() async {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-
-    if (_latitude == null || _longitude == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please get your location first! 📍'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+    if (_lat == null || _lon == null) {
+      _showError('Silakan ambil lokasi terlebih dahulu');
       return;
     }
 
-    // Show confirmation dialog
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirm Pickup Request'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Address: ${_addressController.text}'),
-            const SizedBox(height: 8),
-            Text('Location: ${_latitude!.toStringAsFixed(6)}, ${_longitude!.toStringAsFixed(6)}'),
-            const SizedBox(height: 8),
-            if (_imageFile != null)
-              const Text('Photo: ✓ Attached', style: TextStyle(color: Colors.green))
-            else
-              const Text('Photo: Not attached', style: TextStyle(color: Colors.orange)),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
-            child: const Text('Submit', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
+    final result = await context.read<PickupProvider>().createPickup(
+      address: _addressCtrl.text.trim(),
+      lat: _lat!,
+      lon: _lon!,
+      notes: _notesCtrl.text.trim(),
+      photoPath: _selectedPhoto?.path,
+      onProgress: (p) => setState(() => _uploadProgress = p),
     );
 
-    if (confirm != true) return;
-
-    final pickupProvider = Provider.of<PickupProvider>(context, listen: false);
-
-    final success = await pickupProvider.createPickup(
-      address: _addressController.text.trim(),
-      latitude: _latitude!,
-      longitude: _longitude!,
-      notes: _notesController.text.trim(),
-      photoPath: _imageFile?.path,
-    );
-
-    if (!mounted) return;
-
-    if (success) {
+    if (result != null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('✓ Pickup request created successfully!'),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 3),
+          content: Text('✅ Pickup berhasil dibuat! Sedang mencari collector...'),
+          backgroundColor: AppColors.success,
         ),
       );
-      Navigator.of(context).pop(); // Go back to home
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(pickupProvider.error ?? 'Failed to create pickup'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 4),
-        ),
-      );
+      Navigator.pop(context);
+    } else if (mounted) {
+      final err = context.read<PickupProvider>().error;
+      _showError(err ?? 'Gagal membuat pickup');
     }
+  }
+
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: AppColors.error),
+    );
   }
 
   @override
@@ -345,255 +137,132 @@ class _CreatePickupScreenState extends State<CreatePickupScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Request Pickup'),
-        backgroundColor: Colors.green[700],
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_rounded),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Step indicator
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Text(
-                  'Step 1: Get your location\nStep 2: Take/select photo\nStep 3: Fill address & submit',
-                  style: TextStyle(fontSize: 13, height: 1.5),
-                ),
+      body: Consumer<PickupProvider>(
+        builder: (_, provider, __) {
+          if (provider.isSubmitting) {
+            return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const CircularProgressIndicator(color: AppColors.primary),
+              const SizedBox(height: 16),
+              Text(
+                _uploadProgress > 0 ? 'Mengupload foto... ${(_uploadProgress * 100).toInt()}%' : 'Membuat pickup...',
+                style: AppTextStyles.bodyMedium,
               ),
-              const SizedBox(height: 24),
-
-              // Location Button
-              ElevatedButton.icon(
-                onPressed: _loadingLocation ? null : _getCurrentLocation,
-                icon: _loadingLocation
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
-                    : Icon(_latitude != null ? Icons.check_circle : Icons.my_location),
-                label: Text(_latitude != null
-                    ? '✓ Location Detected'
-                    : 'Get My Location'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _latitude != null ? Colors.green[600] : Colors.blue[600],
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-
-              if (_latitude != null) ...[
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.green[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.green[200]!),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.location_on, color: Colors.green[700], size: 20),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Lat: ${_latitude!.toStringAsFixed(6)}\nLon: ${_longitude!.toStringAsFixed(6)}',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+              if (_uploadProgress > 0) ...[
+                const SizedBox(height: 16),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 48),
+                  child: LinearProgressIndicator(value: _uploadProgress, color: AppColors.primary),
                 ),
               ],
+            ]));
+          }
 
-              const SizedBox(height: 24),
+          return Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-              // Photo Section
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey[300]!),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.camera_alt, color: Colors.grey[700]),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Photo (Optional)',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
+                // Photo upload
+                Text('Foto Sampah', style: AppTextStyles.h4),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: _showImagePicker,
+                  child: Container(
+                    width: double.infinity,
+                    height: 180,
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceVariant,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.divider, width: 2),
                     ),
-                    const SizedBox(height: 12),
-
-                    if (_imageFile != null) ...[
-                      Stack(
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(12),
-                            child: Image.file(
-                              _imageFile!,
-                              height: 200,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                          Positioned(
-                            top: 8,
-                            right: 8,
-                            child: CircleAvatar(
-                              backgroundColor: Colors.red,
-                              child: IconButton(
-                                icon: const Icon(Icons.close, color: Colors.white, size: 20),
-                                onPressed: () => setState(() => _imageFile = null),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      OutlinedButton.icon(
-                        onPressed: _showImageSourceDialog,
-                        icon: const Icon(Icons.sync),
-                        label: const Text('Change Photo'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                        ),
-                      ),
-                    ] else ...[
-                      ElevatedButton.icon(
-                        onPressed: _uploadingImage ? null : _showImageSourceDialog,
-                        icon: _uploadingImage
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.add_a_photo),
-                        label: Text(_uploadingImage ? 'Loading...' : 'Add Photo'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange[600],
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 24),
-
-              // Address Field
-              TextFormField(
-                controller: _addressController,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  labelText: 'Address *',
-                  hintText: 'Enter your full address...\ne.g., Jl. Sudirman No. 5, Jakarta',
-                  prefixIcon: const Icon(Icons.location_on_outlined),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Address is required';
-                  }
-                  if (value.length < 10) {
-                    return 'Please enter a complete address';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-
-              // Notes Field
-              TextFormField(
-                controller: _notesController,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  labelText: 'Notes (Optional)',
-                  hintText: 'Additional info...\ne.g., Waste is at the front gate',
-                  prefixIcon: const Icon(Icons.note_outlined),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 32),
-
-              // Submit Button
-              Consumer<PickupProvider>(
-                builder: (context, pickup, _) {
-                  return ElevatedButton(
-                    onPressed: pickup.isLoading ? null : _submitPickup,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green[700],
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 18),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: pickup.isLoading
-                        ? const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                ),
-                              ),
-                              SizedBox(width: 12),
-                              Text('Submitting...', style: TextStyle(fontSize: 16)),
-                            ],
+                    child: _selectedPhoto != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(14),
+                            child: Image.file(_selectedPhoto!, fit: BoxFit.cover),
                           )
-                        : const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.send),
-                              SizedBox(width: 8),
-                              Text(
-                                'Submit Request',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
+                        : Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                            const Icon(Icons.add_photo_alternate_rounded, size: 48, color: AppColors.textHint),
+                            const SizedBox(height: 8),
+                            Text('Tambah foto sampah', style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textHint)),
+                            Text('(opsional)', style: AppTextStyles.caption),
+                          ]),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // Address
+                AppTextField(
+                  label: 'Alamat Pickup',
+                  hint: 'Masukkan alamat atau gunakan GPS',
+                  controller: _addressCtrl,
+                  maxLines: 2,
+                  suffixIcon: _isGettingLocation
+                      ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
+                      : IconButton(icon: const Icon(Icons.my_location_rounded, color: AppColors.primary), onPressed: _getLocation),
+                  validator: (v) => v == null || v.isEmpty ? 'Alamat wajib diisi' : null,
+                ),
+                const SizedBox(height: 8),
+
+                if (_lat != null && _lon != null)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.primarySurface,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.location_on, color: AppColors.primary, size: 16),
+                      const SizedBox(width: 8),
+                      Text('${_lat!.toStringAsFixed(4)}, ${_lon!.toStringAsFixed(4)}',
+                          style: AppTextStyles.caption.copyWith(color: AppColors.primary)),
+                    ]),
+                  ),
+                const SizedBox(height: 16),
+
+                // Notes
+                AppTextField(
+                  label: 'Catatan (opsional)',
+                  hint: 'Contoh: Sampah di depan pagar, ring bell dua kali...',
+                  controller: _notesCtrl,
+                  maxLines: 3,
+                ),
+                const SizedBox(height: 32),
+
+                // Info box
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.info.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppColors.info.withOpacity(0.2)),
+                  ),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Icon(Icons.info_outline, color: AppColors.info, size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(child: Text(
+                      'Setelah pickup dibuat, sistem akan otomatis mencari collector terdekat yang tersedia.',
+                      style: AppTextStyles.bodySmall.copyWith(color: AppColors.info),
+                    )),
+                  ]),
+                ),
+                const SizedBox(height: 24),
+
+                GradientButton(
+                  text: 'Buat Pickup',
+                  icon: Icons.send_rounded,
+                  onPressed: _submit,
+                ),
+                const SizedBox(height: 24),
+              ]),
+            ),
+          );
+        },
       ),
     );
   }

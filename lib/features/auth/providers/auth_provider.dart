@@ -1,201 +1,108 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:dio/dio.dart';
+import '../../auth/models/user_model.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/constants/api_constants.dart';
-import '../models/user_model.dart';
-import '../models/auth_response.dart' as auth_models;  // ✅ Add alias
 
-class AuthProvider with ChangeNotifier {
-  final ApiClient _apiClient = ApiClient();
-
+class AuthProvider extends ChangeNotifier {
   UserModel? _user;
-  bool _isAuthenticated = false;
   bool _isLoading = false;
   String? _error;
 
   UserModel? get user => _user;
-  bool get isAuthenticated => _isAuthenticated;
   bool get isLoading => _isLoading;
   String? get error => _error;
+  bool get isLoggedIn => _user != null;
+  bool get isCollector => _user?.isCollector ?? false;
 
-  /// Check if user is authenticated on app start
-  Future<void> checkAuthStatus() async {
-    print('[AUTH] Checking auth status...');
-    
-    final token = await _apiClient.getToken();
-    print('[AUTH] Token exists: ${token != null}');
+  final ApiClient _api = ApiClient();
 
-    if (token != null && token.isNotEmpty) {
-      try {
-        print('[AUTH] Fetching user profile...');
-        await getProfile();
-        
-        if (_user != null) {
-          _isAuthenticated = true;
-          print('[AUTH] ✓ User authenticated: ${_user!.email} (${_user!.role})');
-        } else {
-          print('[AUTH] ✗ Profile fetch returned null');
-          _isAuthenticated = false;
-          await _apiClient.clearToken();
-        }
-      } catch (e) {
-        print('[AUTH] ✗ Token invalid or expired: $e');
-        _isAuthenticated = false;
-        _user = null;
-        await _apiClient.clearToken();
+  // Auto-login saat app start
+  Future<bool> tryAutoLogin() async {
+    final token = await _api.getAccessToken();
+    if (token == null) return false;
+    try {
+      final res = await _api.dio.get(ApiConstants.profile);
+      if (res.data['success'] == true) {
+        _user = UserModel.fromJson(res.data['data']);
+        notifyListeners();
+        return true;
       }
-    } else {
-      print('[AUTH] No token found');
-      _isAuthenticated = false;
-      _user = null;
-    }
-
-    notifyListeners();
+    } catch (_) {}
+    return false;
   }
 
-  /// Login user
   Future<bool> login(String email, String password) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
+    _setLoading(true);
     try {
-      print('[AUTH] Attempting login: $email');
-
-      final response = await _apiClient.post(
-        ApiConstants.login,
-        data: {
-          'email': email,
-          'password': password,
-        },
-      );
-
-      print('[AUTH] Login response: ${response.statusCode}');
-
-      if (response.statusCode == 200) {
-        // ✅ Use alias
-        final authResponse = auth_models.AuthResponse.fromJson(response.data['data']);
-        
-        _user = authResponse.profile;
-        await _apiClient.saveToken(authResponse.token);
-        _isAuthenticated = true;
-        
-        print('[AUTH] ✓ Login success!');
-        print('[AUTH] User: ${_user!.name}');
-        print('[AUTH] Email: ${_user!.email}');
-        print('[AUTH] Role: ${_user!.role}');
-        
-        _isLoading = false;
+      final res = await _api.dio.post(ApiConstants.login, data: {
+        'email': email,
+        'password': password,
+      });
+      if (res.data['success'] == true) {
+        final auth = AuthResponse.fromJson(res.data['data']);
+        await _api.saveTokens(auth.accessToken, auth.refreshToken);
+        _user = auth.user;
+        _error = null;
         notifyListeners();
         return true;
       }
-
-      _error = response.data['error'] ?? 'Login failed';
-      print('[AUTH] ✗ Login failed: $_error');
-    } catch (e) {
-      _error = 'Login error';
-      print('[AUTH] ✗ Login exception: $e');
+      _error = res.data['error'] ?? 'Login gagal';
+    } on DioException catch (e) {
+      _error = e.response?.data['error'] ?? 'Koneksi gagal, coba lagi';
+    } finally {
+      _setLoading(false);
     }
-
-    _isLoading = false;
-    notifyListeners();
     return false;
   }
 
-  /// Register user
-  Future<bool> register({
-    required String name,
-    required String email,
-    required String password,
-    String? phone,
-  }) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
+  Future<bool> register(String name, String email, String password, String phone) async {
+    _setLoading(true);
     try {
-      print('[AUTH] Attempting registration: $email');
-
-      final response = await _apiClient.post(
-        ApiConstants.register,
-        data: {
-          'name': name,
-          'email': email,
-          'password': password,
-          'phone': phone ?? '',
-          'role': 'user',
-        },
-      );
-
-      print('[AUTH] Register response: ${response.statusCode}');
-
-      if (response.statusCode == 201 || response.statusCode == 200) {
-        // ✅ Use alias
-        final authResponse = auth_models.AuthResponse.fromJson(response.data['data']);
-        
-        _user = authResponse.profile;
-        await _apiClient.saveToken(authResponse.token);
-        _isAuthenticated = true;
-        
-        print('[AUTH] ✓ Registration success: ${_user!.email}');
-        
-        _isLoading = false;
+      final res = await _api.dio.post(ApiConstants.register, data: {
+        'name': name,
+        'email': email,
+        'password': password,
+        'phone': phone,
+      });
+      if (res.data['success'] == true) {
+        final auth = AuthResponse.fromJson(res.data['data']);
+        await _api.saveTokens(auth.accessToken, auth.refreshToken);
+        _user = auth.user;
+        _error = null;
         notifyListeners();
         return true;
       }
-
-      _error = response.data['error'] ?? 'Registration failed';
-      print('[AUTH] ✗ Registration failed: $_error');
-    } catch (e) {
-      _error = 'Registration error';
-      print('[AUTH] ✗ Registration exception: $e');
+      _error = res.data['error'] ?? 'Registrasi gagal';
+    } on DioException catch (e) {
+      _error = e.response?.data['error'] ?? 'Koneksi gagal, coba lagi';
+    } finally {
+      _setLoading(false);
     }
-
-    _isLoading = false;
-    notifyListeners();
     return false;
   }
 
-  /// Get user profile
-  Future<void> getProfile() async {
+  Future<void> refreshProfile() async {
     try {
-      print('[AUTH] Fetching profile...');
-      
-      final response = await _apiClient.get(ApiConstants.profile);
-
-      print('[AUTH] Profile response: ${response.statusCode}');
-
-      if (response.statusCode == 200) {
-        _user = UserModel.fromJson(response.data['data']);
-        print('[AUTH] ✓ Profile loaded: ${_user!.email} (${_user!.role})');
+      final res = await _api.dio.get(ApiConstants.profile);
+      if (res.data['success'] == true) {
+        _user = UserModel.fromJson(res.data['data']);
         notifyListeners();
-      } else {
-        print('[AUTH] ✗ Profile fetch failed: ${response.statusCode}');
-        throw Exception('Failed to fetch profile');
       }
-    } catch (e) {
-      print('[AUTH] ✗ Profile exception: $e');
-      rethrow;
-    }
+    } catch (_) {}
   }
 
-  /// Logout user
   Future<void> logout() async {
-    print('[AUTH] Logging out...');
-    
-    // Clear token
-    await _apiClient.clearToken();
-    
-    // Clear user data
+    await _api.clearTokens();
     _user = null;
-    _isAuthenticated = false;
-    _error = null;
-    
-    print('[AUTH] ✓ Logged out successfully');
-    
     notifyListeners();
   }
 
-  /// Clear error
+  void _setLoading(bool value) {
+    _isLoading = value;
+    notifyListeners();
+  }
+
   void clearError() {
     _error = null;
     notifyListeners();

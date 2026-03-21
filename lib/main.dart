@@ -1,19 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'features/auth/providers/auth_provider.dart';
-import 'features/pickup/providers/pickup_provider.dart';
-import 'features/collector/providers/collector_provider.dart';
-import 'features/auth/screens/login_screen.dart';
-import 'features/home/screens/home_screen.dart';
-import 'features/collector/screens/collector_dashboard_screen.dart';
 import 'core/constants/app_colors.dart';
+import 'core/theme/app_theme.dart';
+import 'features/auth/providers/auth_provider.dart';
+import 'features/auth/screens/login_screen.dart';
+import 'features/auth/screens/register_screen.dart';
+import 'features/home/screens/home_screen.dart';
+import 'features/pickup/providers/pickup_provider.dart';
+import 'features/pickup/screens/create_pickup_screen.dart';
+import 'features/badge/providers/badge_provider.dart';
+import 'features/badge/screens/badges_screen.dart';
+import 'features/report/providers/report_provider.dart';
+import 'features/feedback/screens/feedback_screen.dart';
+import 'features/collector/providers/collector_provider.dart';
+import 'features/collector/screens/collector_dashboard.dart';
 
 void main() {
-  runApp(const MyApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const EcoTrackerApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class EcoTrackerApp extends StatelessWidget {
+  const EcoTrackerApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -21,124 +29,135 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => PickupProvider()),
+        ChangeNotifierProvider(create: (_) => ReportProvider()),
+        ChangeNotifierProvider(create: (_) => FeedbackProvider()),
         ChangeNotifierProvider(create: (_) => CollectorProvider()),
+        ChangeNotifierProvider(create: (_) => BadgeProvider()),
       ],
-      child: MaterialApp(
-        title: 'EcoTracker',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          primaryColor: AppColors.primary,
-          scaffoldBackgroundColor: AppColors.background,
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: AppColors.primary,
-            primary: AppColors.primary,
-          ),
-          appBarTheme: const AppBarTheme(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            elevation: 0,
-          ),
-          elevatedButtonTheme: ElevatedButtonThemeData(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-          ),
-        ),
-        home: const AuthChecker(),
+      child: Consumer<AuthProvider>(
+        builder: (_, auth, __) {
+          final isCollector = auth.user?.isCollector ?? false;
+          return MaterialApp(
+            title: 'EcoTracker',
+            debugShowCheckedModeBanner: false,
+            theme: isCollector
+                ? AppTheme.collectorTheme
+                : AppTheme.userTheme,
+            home: const SplashScreen(),
+            routes: {
+              '/login': (_) => const LoginScreen(),
+              '/register': (_) => const RegisterScreen(),
+              '/home': (_) => const HomeScreen(),
+              '/collector-home': (_) => const CollectorHomeScreen(),
+              '/create-pickup': (_) => const CreatePickupScreen(),
+              '/feedback': (_) => const FeedbackScreen(),
+            },
+          );
+        },
       ),
     );
   }
 }
 
-class AuthChecker extends StatefulWidget {
-  const AuthChecker({super.key});
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
 
   @override
-  State<AuthChecker> createState() => _AuthCheckerState();
+  State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _AuthCheckerState extends State<AuthChecker> {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scaleAnim;
+
   @override
   void initState() {
     super.initState();
-    _checkAuth();
+    _controller = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 800));
+    _scaleAnim =
+        CurvedAnimation(parent: _controller, curve: Curves.elasticOut);
+    _controller.forward();
+    _init();
   }
 
-  Future<void> _checkAuth() async {
-    print('[AUTH CHECKER] Starting auth check...');
-    
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    
-    // Check auth status
-    await authProvider.checkAuthStatus();
-    
+  Future<void> _init() async {
+    await Future.delayed(const Duration(milliseconds: 1500));
     if (!mounted) return;
-    
-    print('[AUTH CHECKER] Is authenticated: ${authProvider.isAuthenticated}');
-    
-    if (authProvider.isAuthenticated && authProvider.user != null) {
-      final user = authProvider.user!;
-      final role = user.role.toLowerCase().trim();
-      
-      print('[AUTH CHECKER] User: ${user.name}');
-      print('[AUTH CHECKER] Email: ${user.email}');
-      print('[AUTH CHECKER] Role: "$role"');
-      
-      // Small delay to ensure UI is ready
-      await Future.delayed(const Duration(milliseconds: 300));
-      
-      if (!mounted) return;
-      
-      // Route based on role
-      if (role == 'collector') {
-        print('[AUTH CHECKER] ✓ Navigating to COLLECTOR dashboard');
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => const CollectorDashboardScreen(),
-          ),
-        );
-      } else if (role == 'user') {
-        print('[AUTH CHECKER] ✓ Navigating to USER dashboard');
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => const HomeScreen(),
-          ),
-        );
+
+    final auth = context.read<AuthProvider>();
+    final loggedIn = await auth.tryAutoLogin();
+
+    if (!mounted) return;
+    if (loggedIn) {
+      if (auth.user?.isCollector == true) {
+        Navigator.pushReplacementNamed(context, '/collector-home');
       } else {
-        print('[AUTH CHECKER] ⚠ Unknown role: $role - defaulting to USER dashboard');
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-            builder: (_) => const HomeScreen(),
-          ),
-        );
+        Navigator.pushReplacementNamed(context, '/home');
       }
     } else {
-      print('[AUTH CHECKER] Not authenticated - showing login');
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => const LoginScreen(),
-        ),
-      );
+      Navigator.pushReplacementNamed(context, '/login');
     }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.primary,
       body: Center(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 16),
+            ScaleTransition(
+              scale: _scaleAnim,
+              child: Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(28),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.15),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: const Icon(Icons.eco_rounded,
+                    size: 60, color: AppColors.primary),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'EcoTracker',
+              style: TextStyle(
+                fontSize: 32,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 8),
             Text(
-              'Loading...',
-              style: TextStyle(color: Colors.grey[600]),
+              'Bersama kita jaga lingkungan 🌿',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.white.withOpacity(0.85),
+              ),
+            ),
+            const SizedBox(height: 48),
+            const SizedBox(
+              width: 32,
+              height: 32,
+              child: CircularProgressIndicator(
+                  color: Colors.white, strokeWidth: 2.5),
             ),
           ],
         ),

@@ -1,118 +1,85 @@
 import 'package:dio/dio.dart';
-import 'package:pretty_dio_logger/pretty_dio_logger.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../constants/api_constants.dart';
 
 class ApiClient {
   static final ApiClient _instance = ApiClient._internal();
   factory ApiClient() => _instance;
-  
-  late Dio _dio;
-  final _storage = const FlutterSecureStorage();
-  
+
+  late final Dio _dio;
+  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+
   ApiClient._internal() {
     _dio = Dio(BaseOptions(
       baseUrl: ApiConstants.baseUrl,
-      connectTimeout: const Duration(seconds: 30),
-      receiveTimeout: const Duration(seconds: 30),
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      connectTimeout: const Duration(milliseconds: ApiConstants.connectTimeout),
+      receiveTimeout: const Duration(milliseconds: ApiConstants.receiveTimeout),
+      headers: {'Content-Type': 'application/json'},
     ));
-    
-    // Add interceptors
-    _dio.interceptors.add(PrettyDioLogger(
-      requestHeader: true,
-      requestBody: true,
-      responseBody: true,
-      responseHeader: false,
-      error: true,
-      compact: true,
-    ));
-    
-    // Add auth interceptor
+
     _dio.interceptors.add(InterceptorsWrapper(
-      onRequest: (options, handler) async {
-        final token = await getToken();
-        if (token != null) {
-          options.headers['Authorization'] = 'Bearer $token';
-        }
-        return handler.next(options);
-      },
-      onError: (error, handler) async {
-        if (error.response?.statusCode == 401) {
-          // Token expired, logout user
-          await clearToken();
-        }
-        return handler.next(error);
-      },
+      onRequest: _onRequest,
+      onError: _onError,
     ));
   }
-  
-  Dio get dio => _dio;
-  
-  // Token management
-  Future<void> saveToken(String token) async {
-    await _storage.write(key: 'auth_token', value: token);
-  }
-  
-  Future<String?> getToken() async {
-    return await _storage.read(key: 'auth_token');
-  }
-  
-  Future<void> clearToken() async {
-    await _storage.delete(key: 'auth_token');
-  }
-  
-  Future<bool> isAuthenticated() async {
-    final token = await getToken();
-    return token != null;
-  }
-  
-  // HTTP Methods
-  Future<Response> get(String path, {Map<String, dynamic>? queryParameters}) async {
-    try {
-      return await _dio.get(path, queryParameters: queryParameters);
-    } catch (e) {
-      rethrow;
+
+  // Inject token ke setiap request
+  Future<void> _onRequest(RequestOptions options, RequestInterceptorHandler handler) async {
+    final token = await _storage.read(key: ApiConstants.keyAccessToken);
+    if (token != null) {
+      options.headers['Authorization'] = 'Bearer $token';
     }
+    handler.next(options);
   }
-  
-  Future<Response> post(String path, {dynamic data}) async {
-    try {
-      return await _dio.post(path, data: data);
-    } catch (e) {
-      rethrow;
+
+  // Handle 401 → auto refresh token
+  Future<void> _onError(DioException error, ErrorInterceptorHandler handler) async {
+    if (error.response?.statusCode == 401) {
+      final refreshed = await _refreshToken();
+      if (refreshed) {
+        // Ulangi request dengan token baru
+        final token = await _storage.read(key: ApiConstants.keyAccessToken);
+        error.requestOptions.headers['Authorization'] = 'Bearer $token';
+        final response = await _dio.fetch(error.requestOptions);
+        handler.resolve(response);
+        return;
+      }
+      // Refresh gagal → clear token
+      await clearTokens();
     }
+    handler.next(error);
   }
-  
-  Future<Response> postFormData(String path, FormData formData) async {
+
+  Future<bool> _refreshToken() async {
     try {
-      return await _dio.post(
-        path,
-        data: formData,
-        options: Options(
-          contentType: 'multipart/form-data',
-        ),
+      final refreshToken = await _storage.read(key: ApiConstants.keyRefreshToken);
+      if (refreshToken == null) return false;
+
+      final response = await Dio().post(
+        '${ApiConstants.baseUrl}${ApiConstants.refresh}',
+        data: {'refresh_token': refreshToken},
       );
-    } catch (e) {
-      rethrow;
-    }
+
+      if (response.statusCode == 200) {
+        final data = response.data['data'];
+        await _storage.write(key: ApiConstants.keyAccessToken, value: data['access_token']);
+        await _storage.write(key: ApiConstants.keyRefreshToken, value: data['refresh_token']);
+        return true;
+      }
+    } catch (_) {}
+    return false;
   }
-  
-  Future<Response> put(String path, {dynamic data}) async {
-    try {
-      return await _dio.put(path, data: data);
-    } catch (e) {
-      rethrow;
-    }
+
+  Future<void> saveTokens(String accessToken, String refreshToken) async {
+    await _storage.write(key: ApiConstants.keyAccessToken, value: accessToken);
+    await _storage.write(key: ApiConstants.keyRefreshToken, value: refreshToken);
   }
-  
-  Future<Response> delete(String path) async {
-    try {
-      return await _dio.delete(path);
-    } catch (e) {
-      rethrow;
-    }
+
+  Future<void> clearTokens() async {
+    await _storage.deleteAll();
   }
+
+  Future<String?> getAccessToken() => _storage.read(key: ApiConstants.keyAccessToken);
+
+  Dio get dio => _dio;
 }

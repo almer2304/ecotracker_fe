@@ -1,148 +1,85 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/collector_provider.dart';
+import '../../pickup/models/pickup_model.dart';
+import '../../../core/constants/app_colors.dart';
+import '../../../core/constants/app_text_styles.dart';
+import '../../../core/widgets/app_widgets.dart';
 
 class CompleteTaskScreen extends StatefulWidget {
-  final dynamic task;
-
-  const CompleteTaskScreen({super.key, required this.task});
+  final String pickupId;
+  const CompleteTaskScreen({super.key, required this.pickupId});
 
   @override
   State<CompleteTaskScreen> createState() => _CompleteTaskScreenState();
 }
 
 class _CompleteTaskScreenState extends State<CompleteTaskScreen> {
-  final List<WasteItem> _items = [];
+  final List<_WasteItem> _items = [];
 
-  // Common waste categories (you can fetch from API later)
-  final List<Map<String, dynamic>> _categories = [
-    {'id': 1, 'name': 'Plastic', 'pointsPerKg': 10},
-    {'id': 2, 'name': 'Paper', 'pointsPerKg': 8},
-    {'id': 3, 'name': 'Metal', 'pointsPerKg': 15},
-    {'id': 4, 'name': 'Glass', 'pointsPerKg': 12},
-    {'id': 5, 'name': 'Organic', 'pointsPerKg': 5},
-  ];
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<CollectorProvider>().loadCategories();
+    });
+  }
 
   void _addItem() {
-    setState(() {
-      _items.add(WasteItem(
-        categoryId: _categories[0]['id'],
-        categoryName: _categories[0]['name'],
-        weight: 0,
-        pointsPerKg: _categories[0]['pointsPerKg'],
-      ));
-    });
+    final categories = context.read<CollectorProvider>().categories;
+    if (categories.isEmpty) return;
+    setState(() => _items.add(_WasteItem(categoryId: categories.first.id, category: categories.first)));
   }
 
-  void _removeItem(int index) {
-    setState(() {
-      _items.removeAt(index);
-    });
-  }
+  double get _totalWeight => _items.fold(0, (sum, i) => sum + i.weightKg);
+  int get _totalPoints => _items.fold(0, (sum, i) => sum + i.points);
 
-  int _calculateTotalPoints() {
-    int total = 0;
-    for (var item in _items) {
-      total += (item.weight * item.pointsPerKg).toInt();
-    }
-    return total;
-  }
-
-  double _calculateTotalWeight() {
-    double total = 0;
-    for (var item in _items) {
-      total += item.weight;
-    }
-    return total;
-  }
-
-  Future<void> _submitCompletion() async {
+  Future<void> _complete() async {
     if (_items.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please add at least one waste item'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+        const SnackBar(content: Text('Tambahkan minimal 1 item sampah'), backgroundColor: AppColors.error));
       return;
     }
 
-    // Validate all weights are > 0
-    for (var item in _items) {
-      if (item.weight <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('All weights must be greater than 0'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-        return;
-      }
+    final invalid = _items.where((i) => i.weightKg <= 0).isNotEmpty;
+    if (invalid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Berat semua item harus lebih dari 0'), backgroundColor: AppColors.error));
+      return;
     }
 
-    // Show confirmation
+    // Confirm dialog
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirm Completion'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Total Weight: ${_calculateTotalWeight().toStringAsFixed(2)} kg'),
-            Text('Total Points: ${_calculateTotalPoints()}'),
-            const SizedBox(height: 16),
-            const Text('Complete this pickup task?'),
-          ],
-        ),
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Konfirmasi Selesai'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Total berat: ${_totalWeight.toStringAsFixed(2)} kg'),
+          Text('Total poin untuk user: $_totalPoints poin'),
+          const SizedBox(height: 8),
+          const Text('Yakin pickup sudah selesai?'),
+        ]),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Batal')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700]),
-            child: const Text('Confirm'),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.collectorPrimary),
+            child: const Text('Ya, Selesai'),
           ),
         ],
       ),
     );
 
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted) return;
 
-    // Prepare data
-    final itemsData = _items
-        .map((item) => {
-              'category_id': item.categoryId,
-              'weight': item.weight,
-            })
-        .toList();
+    final items = _items.map((i) => {'category_id': i.categoryId, 'weight_kg': i.weightKg}).toList();
+    final success = await context.read<CollectorProvider>().completePickup(widget.pickupId, items);
 
-    // Submit
-    final provider = Provider.of<CollectorProvider>(context, listen: false);
-    final result = await provider.completeTask(widget.task.id, itemsData);
-
-    if (!mounted) return;
-
-    if (result != null) {
+    if (success && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Task completed! +${result['total_points']} points awarded'),
-          backgroundColor: Colors.green,
-        ),
-      );
-
-      // Refresh tasks and go back
-      provider.fetchMyTasks();
-      Navigator.pop(context);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(provider.error ?? 'Failed to complete task'),
-          backgroundColor: Colors.red,
-        ),
-      );
+        const SnackBar(content: Text('✅ Pickup selesai! Poin diberikan ke user'), backgroundColor: AppColors.success));
+      Navigator.popUntil(context, (r) => r.isFirst);
     }
   }
 
@@ -150,271 +87,233 @@ class _CompleteTaskScreenState extends State<CompleteTaskScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Complete Task'),
-        backgroundColor: Colors.green[700],
+        title: const Text('Selesaikan Pickup'),
+        backgroundColor: AppColors.collectorPrimary,
+        foregroundColor: Colors.white,
       ),
-      body: Column(
-        children: [
-          // Task Info Header
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            color: Colors.green[50],
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Completing Pickup:',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  widget.task.address,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Icon(Icons.scale, size: 20, color: Colors.green[700]),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Total: ${_calculateTotalWeight().toStringAsFixed(2)} kg',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green[700],
-                      ),
-                    ),
-                    const Spacer(),
-                    Icon(Icons.star, size: 20, color: Colors.amber[700]),
-                    const SizedBox(width: 8),
-                    Text(
-                      '${_calculateTotalPoints()} pts',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.amber[700],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+      body: Consumer<CollectorProvider>(
+        builder: (_, provider, __) {
+          if (provider.categories.isEmpty) return const AppLoading(message: 'Memuat kategori...');
 
-          // Items List
-          Expanded(
-            child: _items.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.inventory_2, size: 64, color: Colors.grey[300]),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No items added yet',
-                          style: TextStyle(color: Colors.grey[600]),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Tap "Add Item" to start',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
+          return Column(children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  // Header
+                  Container(
                     padding: const EdgeInsets.all(16),
-                    itemCount: _items.length,
-                    itemBuilder: (context, index) {
-                      return _buildItemCard(index);
-                    },
+                    decoration: BoxDecoration(
+                      color: AppColors.collectorSurface,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.info_outline, color: AppColors.collectorPrimary),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(
+                        'Masukkan detail sampah yang dikumpulkan. Poin dihitung otomatis berdasarkan berat dan kategori.',
+                        style: AppTextStyles.bodySmall.copyWith(color: AppColors.collectorPrimaryDark),
+                      )),
+                    ]),
                   ),
-          ),
+                  const SizedBox(height: 20),
 
-          // Bottom Actions
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.2),
-                  blurRadius: 10,
-                  offset: const Offset(0, -5),
-                ),
-              ],
-            ),
-            child: Column(
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _addItem,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add Item'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    minimumSize: const Size(double.infinity, 0),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                  // Items
+                  if (_items.isEmpty)
+                    Center(child: Column(children: [
+                      const Icon(Icons.add_box_outlined, size: 48, color: AppColors.textHint),
+                      const SizedBox(height: 8),
+                      Text('Belum ada item', style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textSecondary)),
+                    ]))
+                  else
+                    ...List.generate(_items.length, (i) => _WasteItemCard(
+                      item: _items[i],
+                      categories: provider.categories,
+                      index: i + 1,
+                      onDelete: () => setState(() => _items.removeAt(i)),
+                      onChanged: () => setState(() {}),
+                    )),
+
+                  const SizedBox(height: 12),
+
+                  // Add button
+                  OutlinedButton.icon(
+                    onPressed: _addItem,
+                    icon: const Icon(Icons.add_rounded),
+                    label: const Text('Tambah Item Sampah'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.collectorPrimary,
+                      side: const BorderSide(color: AppColors.collectorPrimary),
+                      minimumSize: const Size(double.infinity, 48),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                Consumer<CollectorProvider>(
-                  builder: (context, provider, _) {
-                    return ElevatedButton.icon(
-                      onPressed: provider.isLoading || _items.isEmpty
-                          ? null
-                          : _submitCompletion,
-                      icon: provider.isLoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.check_circle),
-                      label: Text(provider.isLoading
-                          ? 'Completing...'
-                          : 'Complete Task'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green[700],
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        minimumSize: const Size(double.infinity, 0),
-                        textStyle: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildItemCard(int index) {
-    final item = _items[index];
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(
-                  'Item ${index + 1}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.delete, color: Colors.red),
-                  onPressed: () => _removeItem(index),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            // Category Dropdown
-            DropdownButtonFormField<int>(
-              value: item.categoryId,
-              decoration: const InputDecoration(
-                labelText: 'Category',
-                border: OutlineInputBorder(),
+                ]),
               ),
-              items: _categories.map((cat) {
-                return DropdownMenuItem<int>(
-                  value: cat['id'],
-                  child: Text('${cat['name']} (${cat['pointsPerKg']} pts/kg)'),
-                );
-              }).toList(),
-              onChanged: (value) {
-                final category = _categories.firstWhere((c) => c['id'] == value);
-                setState(() {
-                  _items[index].categoryId = value!;
-                  _items[index].categoryName = category['name'];
-                  _items[index].pointsPerKg = category['pointsPerKg'];
-                });
-              },
             ),
-            const SizedBox(height: 12),
 
-            // Weight Input
-            TextFormField(
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Weight (kg)',
-                border: OutlineInputBorder(),
-                suffixText: 'kg',
-              ),
-              onChanged: (value) {
-                setState(() {
-                  _items[index].weight = double.tryParse(value) ?? 0;
-                });
-              },
-            ),
-            const SizedBox(height: 12),
-
-            // Points Preview
+            // Summary & complete button
             Container(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.amber[50],
-                borderRadius: BorderRadius.circular(8),
+                color: AppColors.surface,
+                boxShadow: [BoxShadow(color: AppColors.shadowMedium, blurRadius: 12, offset: const Offset(0, -4))],
               ),
-              child: Row(
-                children: [
-                  Icon(Icons.star, color: Colors.amber[700]),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Points: ${(item.weight * item.pointsPerKg).toStringAsFixed(0)}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.amber[900],
-                    ),
-                  ),
-                ],
-              ),
+              child: Column(children: [
+                Row(children: [
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Total Berat', style: AppTextStyles.caption),
+                    Text('${_totalWeight.toStringAsFixed(2)} kg', style: AppTextStyles.h3),
+                  ])),
+                  Container(width: 1, height: 40, color: AppColors.divider),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                    Text('Total Poin untuk User', style: AppTextStyles.caption),
+                    Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                      const Icon(Icons.stars_rounded, color: Colors.amber, size: 20),
+                      const SizedBox(width: 4),
+                      Text('$_totalPoints', style: AppTextStyles.h3.copyWith(color: AppColors.warning)),
+                    ]),
+                  ])),
+                ]),
+                const SizedBox(height: 16),
+                GradientButton(
+                  text: 'Selesaikan Pickup',
+                  icon: Icons.done_all_rounded,
+                  colors: [AppColors.collectorPrimary, AppColors.collectorPrimaryDark],
+                  onPressed: _complete,
+                ),
+              ]),
             ),
-          ],
-        ),
+          ]);
+        },
       ),
     );
   }
 }
 
-class WasteItem {
-  int categoryId;
-  String categoryName;
-  double weight;
-  int pointsPerKg;
+class _WasteItem {
+  String categoryId;
+  WasteCategory category;
+  double weightKg;
 
-  WasteItem({
-    required this.categoryId,
-    required this.categoryName,
-    required this.weight,
-    required this.pointsPerKg,
-  });
+  _WasteItem({required this.categoryId, required this.category, this.weightKg = 0});
+
+  int get points => (weightKg * category.pointsPerKg).round();
+}
+
+class _WasteItemCard extends StatefulWidget {
+  final _WasteItem item;
+  final List<WasteCategory> categories;
+  final int index;
+  final VoidCallback onDelete;
+  final VoidCallback onChanged;
+
+  const _WasteItemCard({required this.item, required this.categories, required this.index, required this.onDelete, required this.onChanged});
+
+  @override
+  State<_WasteItemCard> createState() => _WasteItemCardState();
+}
+
+class _WasteItemCardState extends State<_WasteItemCard> {
+  late TextEditingController _weightCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _weightCtrl = TextEditingController(text: widget.item.weightKg > 0 ? widget.item.weightKg.toString() : '');
+  }
+
+  @override
+  void dispose() {
+    _weightCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.divider),
+        boxShadow: [BoxShadow(color: AppColors.shadow, blurRadius: 6, offset: const Offset(0, 2))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text('Item ${widget.index}', style: AppTextStyles.h4.copyWith(color: AppColors.collectorPrimary)),
+          const Spacer(),
+          GestureDetector(
+            onTap: widget.onDelete,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(color: AppColors.error.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+              child: const Icon(Icons.delete_outline, color: AppColors.error, size: 18),
+            ),
+          ),
+        ]),
+        const SizedBox(height: 12),
+
+        // Category dropdown
+        DropdownButtonFormField<String>(
+          value: widget.item.categoryId,
+          decoration: InputDecoration(
+            labelText: 'Kategori',
+            filled: true,
+            fillColor: AppColors.surfaceVariant,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          ),
+          items: widget.categories.map((cat) => DropdownMenuItem(
+            value: cat.id,
+            child: Row(children: [
+              Text('${cat.name} (${cat.pointsPerKg} poin/kg)', style: AppTextStyles.bodySmall),
+            ]),
+          )).toList(),
+          onChanged: (v) {
+            if (v != null) {
+              widget.item.categoryId = v;
+              widget.item.category = widget.categories.firstWhere((c) => c.id == v);
+              widget.onChanged();
+            }
+          },
+        ),
+        const SizedBox(height: 12),
+
+        // Weight input
+        Row(children: [
+          Expanded(child: TextFormField(
+            controller: _weightCtrl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'Berat (kg)',
+              suffixText: 'kg',
+              filled: true,
+              fillColor: AppColors.surfaceVariant,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            ),
+            onChanged: (v) {
+              widget.item.weightKg = double.tryParse(v) ?? 0;
+              widget.onChanged();
+            },
+          )),
+          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.warning.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Column(children: [
+              const Icon(Icons.stars_rounded, color: Colors.amber, size: 20),
+              Text('${widget.item.points}', style: AppTextStyles.bodySmall.copyWith(color: AppColors.warning, fontWeight: FontWeight.w600)),
+              Text('poin', style: AppTextStyles.caption),
+            ]),
+          ),
+        ]),
+      ]),
+    );
+  }
 }

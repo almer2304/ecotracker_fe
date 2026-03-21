@@ -1,39 +1,57 @@
 class ApiConstants {
-  // GANTI URL INI DENGAN NGROK URL KAMU!
-  static const String baseUrl = 'https://abortively-proexecutive-graham.ngrok-free.dev';
-  
-  static const String apiV1 = '$baseUrl/api/v1';
+  // Ganti dengan URL server kamu
+  // static const String baseUrl = 'http://10.0.2.2:8080/api/v1'; // Android emulator
+  // static const String baseUrl = 'http://localhost:8080/api/v1'; // iOS simulator
+  static const String baseUrl = 'https://abortively-proexecutive-graham.ngrok-free.dev/api/v1'; // ngrok
 
-  // Auth endpoints
-  static const String register = '$apiV1/auth/register';
-  static const String login = '$apiV1/auth/login';
-  static const String profile = '$apiV1/auth/profile';
+  static const String adminSecret = 'ecotracker-admin-secret-2026';
 
-  // User Pickup endpoints
-  static const String pickups = '$apiV1/pickups';
-  static const String myPickups = '$apiV1/pickups/my';
-  static String pickupDetail(String id) => '$apiV1/pickups/$id';
-
-  // Collector endpoints
-  static const String collectorPendingPickups = '$apiV1/collector/pickups/pending';
-  static const String collectorMyTasks = '$apiV1/collector/pickups/my-tasks';
-  static String collectorTakeTask(String pickupId) => '$apiV1/collector/pickups/$pickupId/take';
-  static String collectorCompleteTask(String pickupId) => '$apiV1/collector/pickups/$pickupId/complete';
+  // Auth
+  static const String register = '/auth/register';
+  static const String login = '/auth/login';
+  static const String refresh = '/auth/refresh';
+  static const String profile = '/auth/profile';
+  static const String registerAdmin = '/auth/register-admin';
+  static const String registerCollector = '/auth/register-collector';
 
   // Categories
-  static const String categories = '$apiV1/categories';
+  static const String categories = '/categories';
 
-  // Points
-  static const String pointLogs = '$apiV1/points/logs';
+  // Pickups
+  static const String pickups = '/pickups';
+  static const String myPickups = '/pickups/my';
 
-  // Vouchers
-  static const String vouchers = '$apiV1/vouchers';
-  static const String myVouchers = '$apiV1/vouchers/my';
-  static String claimVoucher(String id) => '$apiV1/vouchers/$id/claim';
+  // Collector
+  static const String collectorStatus = '/collector/status';
+  static const String collectorLocation = '/collector/location';
+  static const String collectorAssigned = '/collector/assigned';
 
-  // Admin endpoints (for future admin web dashboard)
-  static const String adminCollectors = '$apiV1/admin/collectors';
-  static const String adminStats = '$apiV1/admin/stats';
-  static const String adminPickups = '$apiV1/admin/pickups';
-  static String adminDeleteCollector(String id) => '$apiV1/admin/collectors/$id';
+  // Badges
+  static const String badges = '/badges';
+  static const String myBadges = '/badges/my';
+
+  // Reports
+  static const String reports = '/reports';
+  static const String myReports = '/reports/my';
+
+  // Feedback
+  static const String feedback = '/feedback';
+  static const String myFeedback = '/feedback/my';
+
+  // Admin
+  static const String adminDashboard = '/admin/dashboard';
+  static const String adminCollectors = '/admin/collectors';
+  static const String adminPickups = '/admin/pickups';
+  static const String adminReports = '/admin/reports';
+  static const String adminFeedback = '/admin/feedback';
+
+  // Storage keys
+  static const String keyAccessToken = 'access_token';
+  static const String keyRefreshToken = 'refresh_token';
+  static const String keyUserRole = 'user_role';
+  static const String keyUserName = 'user_name';
+
+  // Timeouts
+  static const int connectTimeout = 30000;
+  static const int receiveTimeout = 30000;
 }
