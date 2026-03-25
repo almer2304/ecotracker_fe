@@ -14,6 +14,7 @@ import 'features/report/providers/report_provider.dart';
 import 'features/feedback/screens/feedback_screen.dart';
 import 'features/collector/providers/collector_provider.dart';
 import 'features/collector/screens/collector_dashboard.dart';
+import 'features/pickup/network/websocket_service.dart'; // tambah import ini
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,13 +28,14 @@ class EcoTrackerApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
-        ChangeNotifierProvider(create: (_) => PickupProvider()),
-        ChangeNotifierProvider(create: (_) => ReportProvider()),
-        ChangeNotifierProvider(create: (_) => FeedbackProvider()),
-        ChangeNotifierProvider(create: (_) => CollectorProvider()),
-        ChangeNotifierProvider(create: (_) => BadgeProvider()),
-      ],
+    ChangeNotifierProvider(create: (_) => AuthProvider()),
+    ChangeNotifierProvider(create: (_) => PickupProvider()),
+    ChangeNotifierProvider(create: (_) => ReportProvider()),
+    ChangeNotifierProvider(create: (_) => FeedbackProvider()),
+    ChangeNotifierProvider(create: (_) => CollectorProvider()),
+    ChangeNotifierProvider(create: (_) => BadgeProvider()),
+    ChangeNotifierProvider(create: (_) => WebSocketService()), // tambah ini
+  ],
       child: Consumer<AuthProvider>(
         builder: (_, auth, __) {
           final isCollector = auth.user?.isCollector ?? false;

@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../providers/collector_provider.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../pickup/network/websocket_service.dart';
 import 'complete_task_screen.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
@@ -20,6 +21,7 @@ class CollectorHomeScreen extends StatefulWidget {
 class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
   Timer? _refreshTimer;
   Timer? _locationTimer;
+  StreamSubscription? _wsSubscription;
   bool _isOnline = false;
 
   @override
@@ -31,11 +33,33 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
       context.read<CollectorProvider>().loadAssignedPickup();
       _startRefreshTimer();
       _startLocationUpdates();
+      _connectWebSocket();
+    });
+  }
+
+  void _connectWebSocket() {
+    final ws = context.read<WebSocketService>();
+    ws.connect();
+
+    // Listen event pickup baru → langsung refresh
+    _wsSubscription = ws.onNewPickup.listen((data) {
+      debugPrint('[WS] Pickup baru diterima, refresh...');
+      if (mounted) {
+        context.read<CollectorProvider>().loadAssignedPickup();
+        // Tampilkan snackbar notifikasi
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('📦 Ada pickup baru untukmu!'),
+            backgroundColor: AppColors.collectorPrimary,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
     });
   }
 
   void _startRefreshTimer() {
-    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (mounted) context.read<CollectorProvider>().loadAssignedPickup();
     });
   }
@@ -53,6 +77,7 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
   void dispose() {
     _refreshTimer?.cancel();
     _locationTimer?.cancel();
+    _wsSubscription?.cancel();
     super.dispose();
   }
 
@@ -84,7 +109,6 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
         color: AppColors.collectorPrimary,
         onRefresh: () => context.read<CollectorProvider>().loadAssignedPickup(),
         child: CustomScrollView(slivers: [
-          // AppBar with online toggle
           SliverAppBar(
             expandedHeight: 160,
             pinned: true,
@@ -111,9 +135,21 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
                               style: AppTextStyles.bodySmall.copyWith(color: Colors.white70)),
                         ]),
                       ])),
+                      // WS status indicator
+                      Consumer<WebSocketService>(
+                        builder: (_, ws, __) => Container(
+                          width: 8, height: 8,
+                          margin: const EdgeInsets.only(right: 8),
+                          decoration: BoxDecoration(
+                            color: ws.isConnected ? Colors.greenAccent : Colors.grey,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
                       IconButton(
                         icon: const Icon(Icons.logout_rounded, color: Colors.white),
                         onPressed: () async {
+                          context.read<WebSocketService>().disconnect();
                           await context.read<AuthProvider>().logout();
                           if (mounted) Navigator.pushReplacementNamed(context, '/login');
                         },
@@ -121,7 +157,6 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
                     ]),
                   ),
                   const SizedBox(height: 12),
-                  // Online toggle
                   GestureDetector(
                     onTap: _toggleOnline,
                     child: AnimatedContainer(
@@ -159,7 +194,6 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(children: [
-                // Stats
                 Consumer<AuthProvider>(
                   builder: (_, auth, __) => Row(children: [
                     Expanded(child: StatCard(label: 'Total Pickup', value: '${auth.user?.totalPickupsCompleted ?? 0}', icon: Icons.recycling, color: AppColors.collectorPrimary)),
@@ -171,7 +205,6 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                // Active pickup card
                 Consumer<CollectorProvider>(
                   builder: (_, provider, __) {
                     if (provider.isLoading) return const ShimmerCard(height: 180);
@@ -252,7 +285,6 @@ class _ActivePickupCard extends StatelessWidget {
         boxShadow: [BoxShadow(color: AppColors.collectorPrimary.withOpacity(0.1), blurRadius: 12, offset: const Offset(0, 4))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Header
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -271,7 +303,6 @@ class _ActivePickupCard extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.all(16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // Address
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Icon(Icons.location_on_rounded, color: AppColors.error, size: 18),
               const SizedBox(width: 6),
@@ -279,7 +310,6 @@ class _ActivePickupCard extends StatelessWidget {
             ]),
             const SizedBox(height: 8),
 
-            // User info
             if (pickup.user != null)
               Row(children: [
                 const Icon(Icons.person_outline, size: 16, color: AppColors.textSecondary),
@@ -291,7 +321,6 @@ class _ActivePickupCard extends StatelessWidget {
                 ],
               ]),
 
-            // Photo preview
             if (pickup.photoUrl != null) ...[
               const SizedBox(height: 12),
               ClipRRect(
@@ -303,7 +332,6 @@ class _ActivePickupCard extends StatelessWidget {
 
             const SizedBox(height: 16),
 
-            // Buttons
             Row(children: [
               Expanded(child: OutlinedButton.icon(
                 onPressed: onNavigate,
