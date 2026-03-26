@@ -8,6 +8,7 @@ import '../../pickup/network/websocket_service.dart';
 import '../../pickup/models/pickup_model.dart';
 import 'active_pickup_screen.dart';
 import 'complete_task_screen.dart';
+import 'collector_history_screen.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
 import '../../../core/widgets/app_widgets.dart';
@@ -144,6 +145,16 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
               onTap: () {
                 Navigator.pop(context);
                 _showProfileDialog(context, auth);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.history_rounded, color: AppColors.collectorPrimary),
+              title: const Text('Riwayat Pickup'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => const CollectorHistoryScreen(),
+                ));
               },
             ),
             ListTile(

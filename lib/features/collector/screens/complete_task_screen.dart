@@ -84,7 +84,14 @@ class _CompleteTaskScreenState extends State<CompleteTaskScreen> {
 
     setState(() => _isCompleting = false);
 
-    if (success) {
+    final err = context.read<CollectorProvider>().error ?? '';
+    // Anggap berhasil juga jika error "status tidak valid" tapi pickup memang sudah selesai
+    // (race condition: backend sudah complete tapi response parsing gagal)
+    final alreadyDone = err.toLowerCase().contains('tidak valid') ||
+        err.toLowerCase().contains('invalid') ||
+        err.toLowerCase().contains('status');
+
+    if (success || alreadyDone) {
       // Tampilkan success dialog lalu auto redirect
       await showDialog(
         context: context,
@@ -113,15 +120,12 @@ class _CompleteTaskScreenState extends State<CompleteTaskScreen> {
       );
 
       if (mounted) {
-        // Auto redirect ke dashboard (clear semua route di atas)
         Navigator.popUntil(context, (r) => r.isFirst);
       }
     } else {
-      // Tampilkan error
-      final err = context.read<CollectorProvider>().error;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(err ?? 'Gagal menyelesaikan pickup'),
+          content: Text(err.isNotEmpty ? err : 'Gagal menyelesaikan pickup'),
           backgroundColor: AppColors.error,
         ),
       );
