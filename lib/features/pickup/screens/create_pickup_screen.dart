@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
@@ -19,10 +20,12 @@ class _CreatePickupScreenState extends State<CreatePickupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _addressCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
-  File? _selectedPhoto;
+
+  XFile? _selectedPhoto;   // pakai XFile agar kompatibel web & mobile
   double? _lat;
   double? _lon;
   bool _isGettingLocation = false;
+  bool _locationAcquired = false;
   double _uploadProgress = 0;
 
   @override
@@ -36,25 +39,19 @@ class _CreatePickupScreenState extends State<CreatePickupScreen> {
     setState(() => _isGettingLocation = true);
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        _showError('Layanan lokasi tidak aktif');
-        return;
-      }
+      if (!serviceEnabled) { _showError('Layanan lokasi tidak aktif'); return; }
 
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          _showError('Izin lokasi ditolak');
-          return;
-        }
+        if (permission == LocationPermission.denied) { _showError('Izin lokasi ditolak'); return; }
       }
 
       final pos = await Geolocator.getCurrentPosition();
       setState(() {
         _lat = pos.latitude;
         _lon = pos.longitude;
-        _addressCtrl.text = 'Lat: ${pos.latitude.toStringAsFixed(4)}, Lon: ${pos.longitude.toStringAsFixed(4)}';
+        _locationAcquired = true;
       });
     } catch (e) {
       _showError('Gagal mendapatkan lokasi');
@@ -66,7 +63,7 @@ class _CreatePickupScreenState extends State<CreatePickupScreen> {
   Future<void> _pickImage(ImageSource source) async {
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: source, imageQuality: 70, maxWidth: 1024);
-    if (picked != null) setState(() => _selectedPhoto = File(picked.path));
+    if (picked != null) setState(() => _selectedPhoto = picked);
   }
 
   void _showImagePicker() {
@@ -79,12 +76,13 @@ class _CreatePickupScreenState extends State<CreatePickupScreen> {
           Text('Pilih Foto', style: AppTextStyles.h4),
           const SizedBox(height: 16),
           Row(children: [
-            Expanded(child: OutlinedButton.icon(
+            // Kamera tidak tersedia di web
+            if (!kIsWeb) Expanded(child: OutlinedButton.icon(
               onPressed: () { Navigator.pop(context); _pickImage(ImageSource.camera); },
               icon: const Icon(Icons.camera_alt_rounded),
               label: const Text('Kamera'),
             )),
-            const SizedBox(width: 12),
+            if (!kIsWeb) const SizedBox(width: 12),
             Expanded(child: OutlinedButton.icon(
               onPressed: () { Navigator.pop(context); _pickImage(ImageSource.gallery); },
               icon: const Icon(Icons.photo_library_rounded),
@@ -99,7 +97,7 @@ class _CreatePickupScreenState extends State<CreatePickupScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     if (_lat == null || _lon == null) {
-      _showError('Silakan ambil lokasi terlebih dahulu');
+      _showError('Silakan ambil lokasi GPS terlebih dahulu');
       return;
     }
 
@@ -132,6 +130,29 @@ class _CreatePickupScreenState extends State<CreatePickupScreen> {
     );
   }
 
+  Widget _buildPhotoPreview() {
+    if (_selectedPhoto == null) {
+      return Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        const Icon(Icons.add_photo_alternate_rounded, size: 48, color: AppColors.textHint),
+        const SizedBox(height: 8),
+        Text('Tambah foto sampah', style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textHint)),
+        Text('(opsional)', style: AppTextStyles.caption),
+      ]);
+    }
+    // Gunakan Image.network untuk web, Image.file untuk mobile
+    if (kIsWeb) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Image.network(_selectedPhoto!.path, fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => const Icon(Icons.broken_image)),
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Image.file(File(_selectedPhoto!.path), fit: BoxFit.cover),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -149,7 +170,9 @@ class _CreatePickupScreenState extends State<CreatePickupScreen> {
               const CircularProgressIndicator(color: AppColors.primary),
               const SizedBox(height: 16),
               Text(
-                _uploadProgress > 0 ? 'Mengupload foto... ${(_uploadProgress * 100).toInt()}%' : 'Membuat pickup...',
+                _uploadProgress > 0
+                    ? 'Mengupload foto... ${(_uploadProgress * 100).toInt()}%'
+                    : 'Membuat pickup...',
                 style: AppTextStyles.bodyMedium,
               ),
               if (_uploadProgress > 0) ...[
@@ -168,7 +191,7 @@ class _CreatePickupScreenState extends State<CreatePickupScreen> {
               padding: const EdgeInsets.all(24),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
 
-                // Photo upload
+                // ── Foto Sampah ──────────────────────────────────────────
                 Text('Foto Sampah', style: AppTextStyles.h4),
                 const SizedBox(height: 8),
                 GestureDetector(
@@ -181,60 +204,71 @@ class _CreatePickupScreenState extends State<CreatePickupScreen> {
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: AppColors.divider, width: 2),
                     ),
-                    child: _selectedPhoto != null
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(14),
-                            child: Image.file(_selectedPhoto!, fit: BoxFit.cover),
-                          )
-                        : Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                            const Icon(Icons.add_photo_alternate_rounded, size: 48, color: AppColors.textHint),
-                            const SizedBox(height: 8),
-                            Text('Tambah foto sampah', style: AppTextStyles.bodyMedium.copyWith(color: AppColors.textHint)),
-                            Text('(opsional)', style: AppTextStyles.caption),
-                          ]),
+                    child: _buildPhotoPreview(),
                   ),
                 ),
                 const SizedBox(height: 24),
 
-                // Address
+                // ── Alamat (input manual) ─────────────────────────────────
+                Text('Alamat Pickup', style: AppTextStyles.h4),
+                const SizedBox(height: 8),
                 AppTextField(
-                  label: 'Alamat Pickup',
-                  hint: 'Masukkan alamat atau gunakan GPS',
+                  label: 'Nama Alamat',
+                  hint: 'Contoh: Jl. Sudirman No. 5, Jakarta Pusat',
                   controller: _addressCtrl,
                   maxLines: 2,
-                  suffixIcon: _isGettingLocation
-                      ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)))
-                      : IconButton(icon: const Icon(Icons.my_location_rounded, color: AppColors.primary), onPressed: _getLocation),
                   validator: (v) => v == null || v.isEmpty ? 'Alamat wajib diisi' : null,
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
 
-                if (_lat != null && _lon != null)
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.primarySurface,
-                      borderRadius: BorderRadius.circular(8),
+                // ── Tombol GPS (terpisah dari input alamat) ───────────────
+                Text('Lokasi GPS', style: AppTextStyles.h4),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _isGettingLocation ? null : _getLocation,
+                    icon: _isGettingLocation
+                        ? const SizedBox(width: 18, height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : Icon(
+                            _locationAcquired
+                                ? Icons.location_on_rounded
+                                : Icons.my_location_rounded,
+                            color: _locationAcquired ? AppColors.success : AppColors.primary,
+                          ),
+                    label: Text(
+                      _isGettingLocation
+                          ? 'Mengambil lokasi...'
+                          : _locationAcquired
+                              ? '✅ Lokasi berhasil diambil'
+                              : 'Ambil Lokasi GPS',
+                      style: TextStyle(
+                        color: _locationAcquired ? AppColors.success : AppColors.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                    child: Row(children: [
-                      const Icon(Icons.location_on, color: AppColors.primary, size: 16),
-                      const SizedBox(width: 8),
-                      Text('${_lat!.toStringAsFixed(4)}, ${_lon!.toStringAsFixed(4)}',
-                          style: AppTextStyles.caption.copyWith(color: AppColors.primary)),
-                    ]),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      side: BorderSide(
+                        color: _locationAcquired ? AppColors.success : AppColors.primary,
+                      ),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
                   ),
+                ),
                 const SizedBox(height: 16),
 
-                // Notes
+                // ── Catatan ───────────────────────────────────────────────
                 AppTextField(
                   label: 'Catatan (opsional)',
                   hint: 'Contoh: Sampah di depan pagar, ring bell dua kali...',
                   controller: _notesCtrl,
                   maxLines: 3,
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 24),
 
-                // Info box
+                // ── Info box ──────────────────────────────────────────────
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(

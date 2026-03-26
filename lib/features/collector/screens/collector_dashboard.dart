@@ -2,10 +2,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../providers/collector_provider.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../pickup/network/websocket_service.dart';
+import '../../pickup/models/pickup_model.dart';
+import 'active_pickup_screen.dart';
 import 'complete_task_screen.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_text_styles.dart';
@@ -41,17 +42,31 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
     final ws = context.read<WebSocketService>();
     ws.connect();
 
-    // Listen event pickup baru → langsung refresh
     _wsSubscription = ws.onNewPickup.listen((data) {
-      debugPrint('[WS] Pickup baru diterima, refresh...');
+      debugPrint('[WS] Pickup baru! Refresh...');
       if (mounted) {
         context.read<CollectorProvider>().loadAssignedPickup();
-        // Tampilkan snackbar notifikasi
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('📦 Ada pickup baru untukmu!'),
+          SnackBar(
+            content: const Row(children: [
+              Icon(Icons.notifications_active_rounded, color: Colors.white),
+              SizedBox(width: 8),
+              Text('📦 Ada pickup baru untukmu!'),
+            ]),
             backgroundColor: AppColors.collectorPrimary,
-            duration: Duration(seconds: 3),
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'Lihat',
+              textColor: Colors.white,
+              onPressed: () {
+                final pickup = context.read<CollectorProvider>().assignedPickup;
+                if (pickup != null && mounted) {
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => ActivePickupScreen(pickup: pickup),
+                  ));
+                }
+              },
+            ),
           ),
         );
       }
@@ -59,7 +74,7 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
   }
 
   void _startRefreshTimer() {
-    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       if (mounted) context.read<CollectorProvider>().loadAssignedPickup();
     });
   }
@@ -96,9 +111,103 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
     }
   }
 
-  Future<void> _openMaps(double lat, double lon) async {
-    final url = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lon');
-    if (await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication);
+  // Burger menu untuk collector
+  void _showMenu(BuildContext context) {
+    final auth = context.read<AuthProvider>();
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 40, height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(color: AppColors.divider, borderRadius: BorderRadius.circular(2)),
+            ),
+            ListTile(
+              leading: CircleAvatar(
+                backgroundColor: AppColors.collectorPrimary.withOpacity(0.15),
+                child: Text((auth.user?.name ?? 'C')[0].toUpperCase(),
+                    style: TextStyle(color: AppColors.collectorPrimary, fontWeight: FontWeight.bold)),
+              ),
+              title: Text(auth.user?.name ?? '', style: AppTextStyles.bodyMedium.copyWith(fontWeight: FontWeight.w600)),
+              subtitle: Text(auth.user?.email ?? '', style: AppTextStyles.caption),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.person_outline_rounded, color: AppColors.collectorPrimary),
+              title: const Text('Profil Saya'),
+              onTap: () {
+                Navigator.pop(context);
+                _showProfileDialog(context, auth);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.info_outline_rounded, color: AppColors.collectorPrimary),
+              title: const Text('Tentang EcoTracker'),
+              onTap: () {
+                Navigator.pop(context);
+                showAboutDialog(
+                  context: context,
+                  applicationName: 'EcoTracker',
+                  applicationVersion: 'V2.0',
+                  children: [const Text('Platform manajemen pengambilan sampah daur ulang. Bersama kita jaga lingkungan 🌿')],
+                );
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.logout_rounded, color: AppColors.error),
+              title: const Text('Keluar', style: TextStyle(color: AppColors.error)),
+              onTap: () async {
+                Navigator.pop(context);
+                context.read<WebSocketService>().disconnect();
+                await context.read<AuthProvider>().logout();
+                if (context.mounted) Navigator.pushReplacementNamed(context, '/login');
+              },
+            ),
+            const SizedBox(height: 8),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  void _showProfileDialog(BuildContext context, AuthProvider auth) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Profil Collector'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _profileRow(Icons.person_rounded, 'Nama', auth.user?.name ?? '-'),
+          const SizedBox(height: 12),
+          _profileRow(Icons.email_rounded, 'Email', auth.user?.email ?? '-'),
+          const SizedBox(height: 12),
+          _profileRow(Icons.star_rounded, 'Rating', '${auth.user?.averageRating.toStringAsFixed(1) ?? 0}'),
+          const SizedBox(height: 12),
+          _profileRow(Icons.recycling_rounded, 'Total Pickup', '${auth.user?.totalPickupsCompleted ?? 0}'),
+          const SizedBox(height: 12),
+          _profileRow(Icons.scale_rounded, 'Total Berat', '${auth.user?.totalWeightCollected.toStringAsFixed(1) ?? 0} kg'),
+        ]),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Tutup'))],
+      ),
+    );
+  }
+
+  Widget _profileRow(IconData icon, String label, String value) {
+    return Row(children: [
+      Icon(icon, size: 18, color: AppColors.collectorPrimary),
+      const SizedBox(width: 10),
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: AppTextStyles.caption.copyWith(color: AppColors.textSecondary)),
+        Text(value, style: AppTextStyles.bodyMedium.copyWith(fontWeight: FontWeight.w600)),
+      ]),
+    ]);
   }
 
   @override
@@ -109,21 +218,47 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
         color: AppColors.collectorPrimary,
         onRefresh: () => context.read<CollectorProvider>().loadAssignedPickup(),
         child: CustomScrollView(slivers: [
+          // ── AppBar ────────────────────────────────────────────────────
           SliverAppBar(
             expandedHeight: 160,
             pinned: true,
+            automaticallyImplyLeading: false,
             backgroundColor: AppColors.collectorPrimary,
+            actions: [
+              // WS indicator
+              Consumer<WebSocketService>(
+                builder: (_, ws, __) => Padding(
+                  padding: const EdgeInsets.only(top: 14, right: 4),
+                  child: Tooltip(
+                    message: ws.isConnected ? 'Real-time aktif' : 'Real-time tidak aktif',
+                    child: Container(
+                      width: 8, height: 8,
+                      decoration: BoxDecoration(
+                        color: ws.isConnected ? Colors.greenAccent : Colors.grey,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // Burger menu
+              IconButton(
+                icon: const Icon(Icons.menu_rounded, color: Colors.white),
+                onPressed: () => _showMenu(context),
+              ),
+            ],
             flexibleSpace: FlexibleSpaceBar(
               background: Container(
                 decoration: const BoxDecoration(gradient: AppColors.collectorGradient),
-                padding: const EdgeInsets.fromLTRB(24, 60, 24, 16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                padding: const EdgeInsets.fromLTRB(24, 56, 24, 16),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.end, children: [
                   Consumer<AuthProvider>(
                     builder: (_, auth, __) => Row(children: [
                       CircleAvatar(
                         radius: 20,
                         backgroundColor: Colors.white.withOpacity(0.3),
-                        child: Text((auth.user?.name ?? 'C')[0], style: AppTextStyles.h4.copyWith(color: Colors.white)),
+                        child: Text((auth.user?.name ?? 'C')[0],
+                            style: AppTextStyles.h4.copyWith(color: Colors.white)),
                       ),
                       const SizedBox(width: 12),
                       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -135,28 +270,10 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
                               style: AppTextStyles.bodySmall.copyWith(color: Colors.white70)),
                         ]),
                       ])),
-                      // WS status indicator
-                      Consumer<WebSocketService>(
-                        builder: (_, ws, __) => Container(
-                          width: 8, height: 8,
-                          margin: const EdgeInsets.only(right: 8),
-                          decoration: BoxDecoration(
-                            color: ws.isConnected ? Colors.greenAccent : Colors.grey,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.logout_rounded, color: Colors.white),
-                        onPressed: () async {
-                          context.read<WebSocketService>().disconnect();
-                          await context.read<AuthProvider>().logout();
-                          if (mounted) Navigator.pushReplacementNamed(context, '/login');
-                        },
-                      ),
                     ]),
                   ),
                   const SizedBox(height: 12),
+                  // Online toggle
                   GestureDetector(
                     onTap: _toggleOnline,
                     child: AnimatedContainer(
@@ -194,17 +311,25 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(children: [
+                // Stats
                 Consumer<AuthProvider>(
                   builder: (_, auth, __) => Row(children: [
-                    Expanded(child: StatCard(label: 'Total Pickup', value: '${auth.user?.totalPickupsCompleted ?? 0}', icon: Icons.recycling, color: AppColors.collectorPrimary)),
+                    Expanded(child: StatCard(label: 'Total Pickup',
+                        value: '${auth.user?.totalPickupsCompleted ?? 0}',
+                        icon: Icons.recycling, color: AppColors.collectorPrimary)),
                     const SizedBox(width: 12),
-                    Expanded(child: StatCard(label: 'Berat (kg)', value: '${auth.user?.totalWeightCollected.toStringAsFixed(1) ?? 0}', icon: Icons.scale, color: AppColors.warning)),
+                    Expanded(child: StatCard(label: 'Berat (kg)',
+                        value: '${auth.user?.totalWeightCollected.toStringAsFixed(1) ?? 0}',
+                        icon: Icons.scale, color: AppColors.warning)),
                     const SizedBox(width: 12),
-                    Expanded(child: StatCard(label: 'Rating', value: '${auth.user?.averageRating.toStringAsFixed(1) ?? 0}', icon: Icons.star, color: Colors.amber)),
+                    Expanded(child: StatCard(label: 'Rating',
+                        value: '${auth.user?.averageRating.toStringAsFixed(1) ?? 0}',
+                        icon: Icons.star, color: Colors.amber)),
                   ]),
                 ),
                 const SizedBox(height: 20),
 
+                // Active pickup card
                 Consumer<CollectorProvider>(
                   builder: (_, provider, __) {
                     if (provider.isLoading) return const ShimmerCard(height: 180);
@@ -221,18 +346,24 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
                         child: Column(children: [
                           const Icon(Icons.inbox_outlined, size: 48, color: AppColors.textHint),
                           const SizedBox(height: 12),
-                          Text('Tidak ada pickup aktif', style: AppTextStyles.h4.copyWith(color: AppColors.textSecondary)),
+                          Text('Tidak ada pickup aktif',
+                              style: AppTextStyles.h4.copyWith(color: AppColors.textSecondary)),
                           const SizedBox(height: 4),
-                          Text(_isOnline ? 'Tunggu assignment dari sistem...' : 'Set status ONLINE untuk menerima pickup',
-                              style: AppTextStyles.bodySmall, textAlign: TextAlign.center),
+                          Text(
+                            _isOnline
+                                ? 'Tunggu assignment dari sistem...'
+                                : 'Set status ONLINE untuk menerima pickup',
+                            style: AppTextStyles.bodySmall,
+                            textAlign: TextAlign.center,
+                          ),
                         ]),
                       );
                     }
 
-                    return _ActivePickupCard(
+                    return _AssignedPickupCard(
                       pickup: pickup,
-                      onNavigate: () => _openMaps(pickup.lat, pickup.lon),
-                      onAction: () => _handlePickupAction(pickup),
+                      onAccept: () => _handleAccept(pickup),
+                      onViewDetail: () => _goToActivePickup(pickup),
                     );
                   },
                 ),
@@ -244,36 +375,51 @@ class _CollectorHomeScreenState extends State<CollectorHomeScreen> {
     );
   }
 
-  Future<void> _handlePickupAction(dynamic pickup) async {
+  /// Terima pickup lalu langsung navigasi ke halaman detail
+  Future<void> _handleAccept(PickupModel pickup) async {
     final provider = context.read<CollectorProvider>();
-    switch (pickup.status) {
-      case 'assigned':
-      case 'reassigned':
-        await provider.acceptPickup(pickup.id);
-        break;
-      case 'accepted':
-        await provider.startPickup(pickup.id);
-        break;
-      case 'in_progress':
-        await provider.arriveAtPickup(pickup.id);
-        break;
-      case 'arrived':
-        if (mounted) {
-          Navigator.push(context, MaterialPageRoute(
-            builder: (_) => CompleteTaskScreen(pickupId: pickup.id),
-          ));
-        }
-        break;
+
+    if (pickup.status == 'assigned' || pickup.status == 'reassigned') {
+      final success = await provider.acceptPickup(pickup.id);
+      if (success && mounted) {
+        // Tampilkan notif bahwa pickup diterima
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ Pickup diterima! Silakan berangkat ke lokasi.'),
+            backgroundColor: AppColors.success,
+            duration: Duration(seconds: 3),
+          ),
+        );
+        // Navigasi ke halaman aktif
+        final updated = provider.assignedPickup;
+        if (updated != null) _goToActivePickup(updated);
+      }
     }
+  }
+
+  void _goToActivePickup(PickupModel pickup) {
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => ActivePickupScreen(pickup: pickup),
+    )).then((_) {
+      // Refresh setelah kembali dari halaman aktif
+      context.read<CollectorProvider>().loadAssignedPickup();
+    });
   }
 }
 
-class _ActivePickupCard extends StatelessWidget {
-  final dynamic pickup;
-  final VoidCallback onNavigate;
-  final VoidCallback onAction;
+/// Card pickup yang sudah di-assign, sebelum di-accept
+class _AssignedPickupCard extends StatelessWidget {
+  final PickupModel pickup;
+  final VoidCallback onAccept;
+  final VoidCallback onViewDetail;
 
-  const _ActivePickupCard({required this.pickup, required this.onNavigate, required this.onAction});
+  const _AssignedPickupCard({
+    required this.pickup,
+    required this.onAccept,
+    required this.onViewDetail,
+  });
+
+  bool get _isAccepted => ['accepted', 'in_progress', 'arrived'].contains(pickup.status);
 
   @override
   Widget build(BuildContext context) {
@@ -282,9 +428,12 @@ class _ActivePickupCard extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.collectorPrimary.withOpacity(0.3), width: 2),
-        boxShadow: [BoxShadow(color: AppColors.collectorPrimary.withOpacity(0.1), blurRadius: 12, offset: const Offset(0, 4))],
+        boxShadow: [BoxShadow(
+            color: AppColors.collectorPrimary.withOpacity(0.1),
+            blurRadius: 12, offset: const Offset(0, 4))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Header
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -306,77 +455,66 @@ class _ActivePickupCard extends StatelessWidget {
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Icon(Icons.location_on_rounded, color: AppColors.error, size: 18),
               const SizedBox(width: 6),
-              Expanded(child: Text(pickup.address, style: AppTextStyles.bodyMedium.copyWith(fontWeight: FontWeight.w600))),
+              Expanded(child: Text(pickup.address,
+                  style: AppTextStyles.bodyMedium.copyWith(fontWeight: FontWeight.w600))),
             ]),
-            const SizedBox(height: 8),
-
-            if (pickup.user != null)
+            if (pickup.user != null) ...[
+              const SizedBox(height: 8),
               Row(children: [
                 const Icon(Icons.person_outline, size: 16, color: AppColors.textSecondary),
                 const SizedBox(width: 6),
-                Text(pickup.user.name, style: AppTextStyles.bodySmall),
-                if (pickup.user.phone != null) ...[
+                Text(pickup.user!.name, style: AppTextStyles.bodySmall),
+                if (pickup.user!.phone != null) ...[
                   const SizedBox(width: 8),
-                  Text('• ${pickup.user.phone}', style: AppTextStyles.bodySmall),
+                  Text('• ${pickup.user!.phone}', style: AppTextStyles.bodySmall),
                 ],
               ]),
-
-            if (pickup.photoUrl != null) ...[
-              const SizedBox(height: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Image.network(pickup.photoUrl, height: 100, width: double.infinity, fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const SizedBox()),
-              ),
             ],
-
             const SizedBox(height: 16),
 
-            Row(children: [
-              Expanded(child: OutlinedButton.icon(
-                onPressed: onNavigate,
-                icon: const Icon(Icons.map_rounded, size: 18),
-                label: const Text('Navigasi'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.collectorPrimary,
-                  side: const BorderSide(color: AppColors.collectorPrimary),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            // Tombol: kalau sudah accepted → "Lihat Detail", kalau belum → "Terima"
+            if (_isAccepted)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: onViewDetail,
+                  icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                  label: const Text('Lihat Detail & Navigasi'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.collectorPrimary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
                 ),
-              )),
-              const SizedBox(width: 12),
-              Expanded(child: ElevatedButton.icon(
-                onPressed: onAction,
-                icon: Icon(_getActionIcon(pickup.status), size: 18),
-                label: Text(_getActionLabel(pickup.status)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.collectorPrimary,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              )),
-            ]),
+              )
+            else
+              Row(children: [
+                Expanded(child: OutlinedButton.icon(
+                  onPressed: onViewDetail,
+                  icon: const Icon(Icons.info_outline_rounded, size: 18),
+                  label: const Text('Detail'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.collectorPrimary,
+                    side: const BorderSide(color: AppColors.collectorPrimary),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                )),
+                const SizedBox(width: 12),
+                Expanded(child: ElevatedButton.icon(
+                  onPressed: onAccept,
+                  icon: const Icon(Icons.check_circle_outline, size: 18),
+                  label: const Text('Terima'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.collectorPrimary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                )),
+              ]),
           ]),
         ),
       ]),
     );
-  }
-
-  String _getActionLabel(String status) {
-    switch (status) {
-      case 'assigned': case 'reassigned': return 'Terima';
-      case 'accepted': return 'Mulai';
-      case 'in_progress': return 'Tiba';
-      case 'arrived': return 'Selesaikan';
-      default: return 'Proses';
-    }
-  }
-
-  IconData _getActionIcon(String status) {
-    switch (status) {
-      case 'assigned': case 'reassigned': return Icons.check_circle_outline;
-      case 'accepted': return Icons.directions_car_rounded;
-      case 'in_progress': return Icons.location_on_rounded;
-      case 'arrived': return Icons.done_all_rounded;
-      default: return Icons.arrow_forward;
-    }
   }
 }

@@ -19,6 +19,10 @@ class CollectorProvider extends ChangeNotifier {
 
   final ApiClient _api = ApiClient();
 
+  // Helper URL collector pickups — pastikan selalu pakai base dari ApiConstants
+  String _pickupUrl(String pickupId, String action) =>
+      '${ApiConstants.collectorAssigned.replaceAll('/assigned', '/pickups')}/$pickupId/$action';
+
   Future<void> loadAssignedPickup() async {
     _isLoading = true;
     notifyListeners();
@@ -53,10 +57,12 @@ class CollectorProvider extends ChangeNotifier {
     _isUpdatingStatus = true;
     notifyListeners();
     try {
-      final res = await _api.dio.put(ApiConstants.collectorStatus, data: {'is_online': isOnline});
+      final res = await _api.dio.put(
+        ApiConstants.collectorStatus,
+        data: {'is_online': isOnline},
+      );
       if (res.data['success'] == true) return true;
-    } on DioException catch (_) {}
-    finally {
+    } on DioException catch (_) {} finally {
       _isUpdatingStatus = false;
       notifyListeners();
     }
@@ -65,14 +71,19 @@ class CollectorProvider extends ChangeNotifier {
 
   Future<bool> updateLocation(double lat, double lon) async {
     try {
-      final res = await _api.dio.put(ApiConstants.collectorLocation, data: {'lat': lat, 'lon': lon});
+      final res = await _api.dio.put(
+        ApiConstants.collectorLocation,
+        data: {'lat': lat, 'lon': lon},
+      );
       return res.data['success'] == true;
-    } catch (_) { return false; }
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<bool> acceptPickup(String pickupId) async {
     try {
-      final res = await _api.dio.post('${ApiConstants.pickups.replaceAll('/pickups', '/collector/pickups')}/$pickupId/accept');
+      final res = await _api.dio.post(_pickupUrl(pickupId, 'accept'));
       if (res.data['success'] == true) {
         await loadAssignedPickup();
         return true;
@@ -86,8 +97,11 @@ class CollectorProvider extends ChangeNotifier {
 
   Future<bool> startPickup(String pickupId) async {
     try {
-      final res = await _api.dio.post('/collector/pickups/$pickupId/start');
-      if (res.data['success'] == true) { await loadAssignedPickup(); return true; }
+      final res = await _api.dio.post(_pickupUrl(pickupId, 'start'));
+      if (res.data['success'] == true) {
+        await loadAssignedPickup();
+        return true;
+      }
     } on DioException catch (e) {
       _error = e.response?.data['error'] ?? 'Gagal memulai pickup';
       notifyListeners();
@@ -97,8 +111,11 @@ class CollectorProvider extends ChangeNotifier {
 
   Future<bool> arriveAtPickup(String pickupId) async {
     try {
-      final res = await _api.dio.post('/collector/pickups/$pickupId/arrive');
-      if (res.data['success'] == true) { await loadAssignedPickup(); return true; }
+      final res = await _api.dio.post(_pickupUrl(pickupId, 'arrive'));
+      if (res.data['success'] == true) {
+        await loadAssignedPickup();
+        return true;
+      }
     } on DioException catch (e) {
       _error = e.response?.data['error'] ?? 'Gagal update status tiba';
       notifyListeners();
@@ -108,7 +125,10 @@ class CollectorProvider extends ChangeNotifier {
 
   Future<bool> completePickup(String pickupId, List<Map<String, dynamic>> items) async {
     try {
-      final res = await _api.dio.post('/collector/pickups/$pickupId/complete', data: {'items': items});
+      final res = await _api.dio.post(
+        _pickupUrl(pickupId, 'complete'),
+        data: {'items': items},
+      );
       if (res.data['success'] == true) {
         _assignedPickup = null;
         notifyListeners();
@@ -121,5 +141,8 @@ class CollectorProvider extends ChangeNotifier {
     return false;
   }
 
-  void clearError() { _error = null; notifyListeners(); }
+  void clearError() {
+    _error = null;
+    notifyListeners();
+  }
 }
