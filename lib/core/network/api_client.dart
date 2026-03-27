@@ -15,6 +15,7 @@ class ApiClient {
       connectTimeout: const Duration(milliseconds: ApiConstants.connectTimeout),
       receiveTimeout: const Duration(milliseconds: ApiConstants.receiveTimeout),
       headers: {'Content-Type': 'application/json'},
+      responseType: ResponseType.json, 
     ));
 
     _dio.interceptors.add(InterceptorsWrapper(
